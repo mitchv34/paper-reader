@@ -13,6 +13,8 @@ dependencies = [
     "marker-pdf",
     "mcp[cli]",
     "click",
+    "sentence-transformers",
+    "numpy",
 ]
 
 [project.scripts]

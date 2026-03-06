@@ -7,15 +7,26 @@ user_invocable: true
 
 # Paper Reader
 
-Convert academic PDF papers into clean, structured markdown that's easy to read and reason about. Uses the `marker-pdf` library for high-quality conversion with LaTeX equation support, table extraction, and section-aware chunking.
+Ingest academic PDFs into a persistent RAG store for instant semantic search. Converts papers once using `marker-pdf`, computes embeddings, and stores chunks in SQLite for fast retrieval. Also supports one-off conversion without ingestion.
 
 ## Available MCP Tools
 
-This skill requires the `paper-reader` MCP server to be configured. The server provides:
+This skill requires the `paper-reader` MCP server to be configured.
 
-- **`convert_pdf(file_path, output_format)`** - Full document conversion to markdown/HTML/JSON
-- **`convert_pdf_chunks(file_path, max_tokens)`** - Chunked RAG format with section hierarchy
-- **`convert_pdf_section(file_path, section)`** - Extract a single section by title
+### RAG Store (primary workflow)
+
+- **`ingest_paper(file_path, zotero_item_key?, title?, authors?, force?)`** - Convert + embed + store. Skips if already ingested.
+- **`search_papers(query, top_k?, paper_filter?, section_filter?)`** - Semantic search across all ingested papers.
+- **`keyword_search_papers(query, top_k?, paper_filter?)`** - FTS5 keyword search for exact terms, names, equations.
+- **`list_ingested_papers()`** - Show all papers in the store.
+- **`get_paper_chunks(paper_id, section_filter?, offset?, limit?)`** - Read chunks from a specific paper.
+- **`remove_paper(paper_id)`** - Delete a paper and its chunks.
+
+### One-off Conversion (no storage)
+
+- **`convert_pdf(file_path, output_format)`** - Full document conversion to markdown/HTML/JSON.
+- **`convert_pdf_chunks(file_path, max_tokens)`** - Chunked RAG format with section hierarchy.
+- **`convert_pdf_section(file_path, section)`** - Extract a single section by title.
 
 ## Usage
 
@@ -32,34 +43,45 @@ The user may provide:
 If the user references a Zotero item (by key, title, or author search):
 
 1. Use `zotero_search_items` to find the item
-2. Use `zotero_item_metadata` to get the item details and find the attachment key
-3. The PDF is stored locally at `~/Zotero/storage/{ATTACHMENT_KEY}/filename.pdf`
-4. Use that path with the paper-reader MCP tools
+2. Use `zotero_get_item_metadata` to get details
+3. Use `zotero_get_item_children` to find the PDF attachment key
+4. The PDF is stored locally at `~/Zotero/storage/{ATTACHMENT_KEY}/filename.pdf`
+5. Ingest with both the file path and the zotero_item_key for linking
 
 Example flow:
 ```
 User: "/paper-reader the Hampole 2025 paper"
-1. zotero_search_items(query="Hampole 2025") -> item_key
-2. zotero_item_metadata(item_key) -> find PDF attachment key
-3. convert_pdf_chunks("~/Zotero/storage/{KEY}/hampole2025.pdf")
+1. zotero_search_items(query="Hampole 2025") -> item_key "ABC12345"
+2. zotero_get_item_children(item_key="ABC12345") -> attachment_key "XYZ98765", filename
+3. ingest_paper(
+     file_path="~/Zotero/storage/XYZ98765/hampole2025.pdf",
+     zotero_item_key="ABC12345",
+     title="...", authors="..."
+   )
+4. Report: "Ingested 45 chunks. Ready to search."
 ```
 
-### 3. Convert the PDF
+### 3. Choose the right action
 
-- For **reading/understanding**: use `convert_pdf` for full markdown
-- For **large papers** or **RAG ingestion**: use `convert_pdf_chunks` with appropriate max_tokens
-- For **targeted questions**: use `convert_pdf_section` to get just the relevant section
+- **First time with a paper**: Use `ingest_paper` to store it permanently. This takes ~30-60s but only happens once.
+- **Searching across papers**: Use `search_papers` for semantic search (instant) or `keyword_search_papers` for exact terms.
+- **Reading a specific section**: Use `get_paper_chunks` with a section_filter after finding the paper_id.
+- **Quick one-off read**: Use `convert_pdf` or `convert_pdf_section` if the user just wants to glance at something without storing it.
 
-### 4. Present the result
+### 4. Present results
 
-After conversion:
-- Summarize the document structure (sections found, total chunks)
-- Present the content in the conversation
-- For chunked output, show the section outline first, then offer to dive into specific sections
+After ingestion:
+- Report chunk count and timing
+- Offer to search or browse sections
+
+After search:
+- Show the top results with section paths and scores
+- Offer to get more context from the same paper/section
 
 ## Tips
 
-- For papers over ~30 pages, prefer `convert_pdf_chunks` to avoid overwhelming the context
-- Use `convert_pdf_section` when the user asks about a specific part (e.g., "what does the Methods section say?")
-- The section hierarchy preserves subsection nesting (e.g., "Methods > Data Collection > Survey Design")
-- Marker handles LaTeX equations, tables, and figures well for academic papers
+- Always pass `zotero_item_key` when ingesting from Zotero, so the paper is linked for future lookups.
+- Second calls to `ingest_paper` with the same file skip automatically (content hash check).
+- Use `paper_filter` in search to scope results to a single paper by title or Zotero key.
+- Use `section_filter` to narrow results to specific parts (e.g., "Methods", "Results").
+- The section hierarchy preserves subsection nesting (e.g., "Methods > Data Collection > Survey Design").
