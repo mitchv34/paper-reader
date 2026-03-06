@@ -110,8 +110,12 @@ def ingest_paper(
     zotero_item_key: str = "",
     title: str = "",
     authors: str = "",
+    arxiv_id: str = "",
+    doi: str = "",
+    url: str = "",
     max_tokens: int = 2000,
     page_range: str = "",
+    backend: str = "auto",
     force: bool = False,
 ) -> str:
     """Convert a PDF, compute embeddings, and store for instant search.
@@ -124,13 +128,19 @@ def ingest_paper(
         zotero_item_key: Optional Zotero item key to link this paper.
         title: Optional paper title (auto-extracted from PDF if omitted).
         authors: Optional authors string.
+        arxiv_id: Optional arXiv ID (e.g. "2308.13418"). Enables LaTeX source download.
+        doi: Optional DOI. If it matches arXiv pattern, enables LaTeX source download.
+        url: Optional URL. If it's an arXiv URL, enables LaTeX source download.
         max_tokens: Maximum tokens per chunk (default 2000).
         page_range: Optional page range (0-indexed), e.g. "0-4" for first 5 pages.
             Leave empty for all pages.
+        backend: Conversion backend. "auto" (default) tries arXiv source first,
+            falls back to fast PyMuPDF. "arxiv" = LaTeX source only.
+            "fast" = PyMuPDF4LLM. "marker" = marker-pdf (slow, best quality).
         force: Re-ingest even if content hash is unchanged.
 
     Returns:
-        JSON with ingestion status, paper_id, chunk count, and timing.
+        JSON with ingestion status, backend used, paper_id, chunk count, and timing.
     """
     store = _get_store()
     result = store.ingest(
@@ -138,8 +148,12 @@ def ingest_paper(
         zotero_item_key=zotero_item_key,
         title=title,
         authors=authors,
+        arxiv_id=arxiv_id,
+        doi=doi,
+        url=url,
         max_tokens=max_tokens,
         page_range=page_range or None,
+        backend=backend,
         force=force,
     )
     return json.dumps(result, indent=2)

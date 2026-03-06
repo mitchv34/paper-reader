@@ -15,6 +15,7 @@ dependencies = [
     "click",
     "sentence-transformers",
     "numpy",
+    "pymupdf4llm",
 ]
 
 [project.scripts]

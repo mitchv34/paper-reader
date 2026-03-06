@@ -123,6 +123,51 @@ class PaperStore:
         self._emb_dirty = False
 
     # ------------------------------------------------------------------
+    # Backend selection
+    # ------------------------------------------------------------------
+
+    def _convert(
+        self,
+        file_path: str,
+        arxiv_id: str = "",
+        doi: str = "",
+        url: str = "",
+        max_tokens: int = 2000,
+        page_range: str | None = None,
+        backend: str = "auto",
+    ) -> tuple[dict, str]:
+        """Convert PDF to chunks using the selected backend.
+
+        Returns (chunks_result, backend_name).
+        """
+        if backend == "arxiv" or backend == "auto":
+            # Try arXiv source
+            from paper_reader.arxiv_source import (
+                extract_arxiv_id, fetch_arxiv_source, parse_latex_to_chunks,
+            )
+            aid = extract_arxiv_id(doi=doi, url=url, arxiv_id=arxiv_id)
+            if aid:
+                source = fetch_arxiv_source(aid)
+                if source:
+                    result = parse_latex_to_chunks(source["tex_content"], max_tokens=max_tokens)
+                    result["metadata"]["source_path"] = file_path
+                    return result, "arxiv"
+
+            if backend == "arxiv":
+                raise ValueError(f"arXiv source not found for: arxiv_id={arxiv_id}, doi={doi}, url={url}")
+
+        if backend == "fast" or backend == "auto":
+            from paper_reader.fast_converter import convert_to_chunks_fast
+            result = convert_to_chunks_fast(file_path, max_tokens=max_tokens, page_range=page_range)
+            return result, "fast"
+
+        if backend == "marker":
+            result = convert_to_chunks(file_path, max_tokens=max_tokens, page_range=page_range)
+            return result, "marker"
+
+        raise ValueError(f"Unknown backend: {backend!r}. Use 'auto', 'arxiv', 'fast', or 'marker'.")
+
+    # ------------------------------------------------------------------
     # Ingest
     # ------------------------------------------------------------------
 
@@ -132,11 +177,22 @@ class PaperStore:
         zotero_item_key: str = "",
         title: str = "",
         authors: str = "",
+        arxiv_id: str = "",
+        doi: str = "",
+        url: str = "",
         max_tokens: int = 2000,
         page_range: str | None = None,
+        backend: str = "auto",
         force: bool = False,
     ) -> dict:
-        """Convert a PDF, compute embeddings, and store in the database."""
+        """Convert a PDF, compute embeddings, and store in the database.
+
+        Backend options:
+            "auto"   - Try arXiv source first, fall back to fast hybrid.
+            "arxiv"  - arXiv LaTeX source only (fails if not available).
+            "fast"   - PyMuPDF4LLM (fast, no GPU).
+            "marker" - marker-pdf (slow, highest quality).
+        """
         t0 = time.time()
 
         zk = zotero_item_key or None
@@ -152,8 +208,11 @@ class PaperStore:
                 "SELECT paper_id, content_hash FROM papers WHERE file_path = ?", (file_path,)
             ).fetchone()
 
-        # Convert PDF to chunks
-        result = convert_to_chunks(file_path, max_tokens=max_tokens, page_range=page_range)
+        # Convert to chunks using selected backend
+        result, used_backend = self._convert(
+            file_path, arxiv_id=arxiv_id, doi=doi, url=url,
+            max_tokens=max_tokens, page_range=page_range, backend=backend,
+        )
         new_hash = result["metadata"]["content_hash"]
 
         # Skip if unchanged
@@ -213,6 +272,7 @@ class PaperStore:
         elapsed = time.time() - t0
         return {
             "status": "ingested",
+            "backend": used_backend,
             "paper_id": paper_id,
             "title": title,
             "total_chunks": len(result["chunks"]),
